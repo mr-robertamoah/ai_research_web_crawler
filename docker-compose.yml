@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: amalitech_scraper
+    environment:
+      # Max depth to follow internal links (default: 3)
+      MAX_DEPTH: ${MAX_DEPTH:-3}
+      # OCR engine: 'easyocr' (default) or 'pytesseract'
+      OCR_ENGINE: ${OCR_ENGINE:-easyocr}
+      # Optional: force a specific input file name
+      INPUT_FILE: ${INPUT_FILE:-}
+    volumes:
+      # Mount your input file(s) from the project root into the container
+      - .:/app/input:ro
+      # Output: sites folder is written to ./sites on your host machine
+      - ./sites:/app/sites
+    working_dir: /app
+    # Override INPUT_FILE env so the script looks in /app/input for the file
+    command: >
+      sh -c "cp /app/input/*.csv /app/ 2>/dev/null || true;
+             cp /app/input/*.txt /app/ 2>/dev/null || true;
+             python scraper.py"
+    restart: "no"

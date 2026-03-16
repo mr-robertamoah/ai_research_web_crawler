@@ -1,0 +1,7 @@
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.2.1
+Pillow==10.3.0
+pandas==2.2.2
+easyocr==1.7.1
+pytesseract==0.3.10
