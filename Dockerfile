@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pre-download EasyOCR English model at build time so first run is fast
 RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=False)"
 
-COPY scraper.py .
+COPY scraper.py manual_ingest.py .
 
 # Input files and output sites folder are mounted at runtime (see docker-compose.yml)
 CMD ["python", "scraper.py"]

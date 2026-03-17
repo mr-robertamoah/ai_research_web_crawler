@@ -197,43 +197,46 @@ docker compose build
 > **Note:** The build downloads and caches the EasyOCR model inside the image.
 > This makes subsequent runs fast. The build may take 3–5 minutes on first run.
 
-### 4. Run the scraper
+### 4. Start the container (idle)
 
-**Basic run (all defaults):**
-```bash
-docker compose up
-```
+The container stays running so you can execute commands on demand.
 
-**With custom depth:**
-```bash
-MAX_DEPTH=5 docker compose up
-```
-
-**Switch to pytesseract:**
-```bash
-OCR_ENGINE=pytesseract docker compose up
-```
-
-**Combine options:**
-```bash
-MAX_DEPTH=4 OCR_ENGINE=pytesseract docker compose up
-```
-
-**Run in the background (detached):**
 ```bash
 docker compose up -d
 ```
 
-**Follow logs while running in background:**
+### 5. Run commands with `exec`
+
+**Scrape (all defaults):**
 ```bash
-docker compose logs -f
+docker compose exec scraper python scraper.py
 ```
 
-### 5. View results
+**With custom depth:**
+```bash
+docker compose exec -e MAX_DEPTH=5 scraper python scraper.py
+```
+
+**Switch to pytesseract:**
+```bash
+docker compose exec -e OCR_ENGINE=pytesseract scraper python scraper.py
+```
+
+**Manual ingest (screenshots/texts):**
+```bash
+docker compose exec scraper python manual_ingest.py
+```
+
+**Manual ingest for a single competitor:**
+```bash
+docker compose exec -e COMPETITOR=acme scraper python manual_ingest.py
+```
+
+### 6. View results
 
 Results are written to the `sites/` folder in your project directory on your host machine — the same as the local option. Docker mounts this folder automatically.
 
-### 6. Stop / clean up
+### 7. Stop / clean up
 
 ```bash
 # Stop the container
@@ -245,11 +248,74 @@ docker compose down --rmi all
 
 ### Re-running after code changes
 
-If you edit `scraper.py`, rebuild before running:
+If you edit `scraper.py` or `manual_ingest.py`, rebuild before running:
 
 ```bash
 docker compose build && docker compose up
 ```
+
+---
+
+## Manual Screenshots Ingest (LinkedIn, etc.)
+
+If you capture **screenshots and/or text files** (e.g., LinkedIn posts) and want them structured into CSVs, use the manual ingest flow.
+
+### 1. Recommended input layout
+
+```
+manual/
+├── <competitor_name>/
+│   ├── images/
+│   │   ├── post-01.png
+│   │   └── post-02.jpg
+│   └── texts/
+│       ├── post-01.txt
+│       └── post-02.txt
+```
+
+**Matching rule:** files are paired by filename stem (e.g., `post-01.png` ↔ `post-01.txt`).
+
+### 2. Run locally (Python)
+
+```bash
+python manual_ingest.py
+```
+
+**Process a single competitor:**
+```bash
+COMPETITOR=acme python manual_ingest.py
+```
+
+### 3. Run in Docker
+
+Place your `manual/` folder in the project root, then run:
+
+```bash
+docker compose run --rm scraper python manual_ingest.py
+```
+
+### 4. Output structure
+
+Each competitor produces a separate output folder under `sites/`:
+
+```
+sites/
+└── <competitor>_manual_YYYY-MM-DD_HH-MM-SS/
+    ├── images/
+    ├── texts/
+    ├── ocr_output.csv
+    └── posts_text.csv
+```
+
+### Manual ingest environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MANUAL_DIR` | `./manual` (auto-detect) | Input root containing competitor folders |
+| `OUTPUT_DIR` | `./sites` | Where output folders are written |
+| `COMPETITOR` | _(all)_ | Process only one competitor folder |
+| `OCR_ENGINE` | `easyocr` | OCR engine to use: `easyocr` or `pytesseract` |
+| `SKIP_OCR` | _unset_ | Set to `1` to skip OCR |
 
 ---
 

@@ -19,9 +19,9 @@ services:
       # Output: sites folder is written to ./sites on your host machine
       - ./sites:/app/sites
     working_dir: /app
-    # Override INPUT_FILE env so the script looks in /app/input for the file
+    # Keep container running so you can exec commands (scrape or manual ingest)
     command: >
       sh -c "cp /app/input/*.csv /app/ 2>/dev/null || true;
              cp /app/input/*.txt /app/ 2>/dev/null || true;
-             python scraper.py"
+             tail -f /dev/null"
     restart: "no"

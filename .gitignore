@@ -1,0 +1,6 @@
+sites/*
+
+.env
+
+*.txt
+*.csv
