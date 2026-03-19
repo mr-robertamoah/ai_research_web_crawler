@@ -275,7 +275,7 @@ def extract_clean_text(soup: BeautifulSoup) -> str:
 def crawl_site(start_url: str, site_dir: Path, ocr_tuple: tuple, session: requests.Session):
     """
     BFS crawl of a single competitor site.
-    Writes pages_text.csv and ocr_output.csv into site_dir.
+    Writes pages_text.csv and ocr_output.csv into site_dir incrementally.
     """
     pages_dir  = site_dir / "pages"
     images_dir = site_dir / "images"
@@ -284,103 +284,111 @@ def crawl_site(start_url: str, site_dir: Path, ocr_tuple: tuple, session: reques
 
     base_domain = urllib.parse.urlparse(start_url).netloc.lower()
     visited: set[str] = set()
-    # Queue items: (url, depth)
     queue: deque[tuple[str, int]] = deque([(normalise_url(start_url), 0)])
 
-    pages_rows: list[dict]  = []
-    ocr_rows:   list[dict]  = []
-    image_hashes: set[str]  = set()   # avoid duplicate images across pages
+    image_hashes: set[str] = set()
+    pages_count = 0
+    ocr_count   = 0
 
-    log.info(f"  Starting crawl: {start_url}  (max depth={MAX_DEPTH})")
-
-    while queue:
-        url, depth = queue.popleft()
-        norm = normalise_url(url)
-
-        if norm in visited:
-            continue
-        if depth > MAX_DEPTH:
-            continue
-
-        visited.add(norm)
-
-        try:
-            time.sleep(REQUEST_DELAY)
-            resp = session.get(url, timeout=REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            content_type = resp.headers.get("Content-Type", "")
-            if "text/html" not in content_type:
-                continue
-        except Exception as e:
-            log.debug(f"    Skip {url}: {e}")
-            continue
-
-        log.info(f"    [{depth}] {url}")
-        soup = BeautifulSoup(resp.text, "lxml")
-
-        # ── Save raw HTML ──
-        html_file = pages_dir / f"{slug_from_url(url)}.html"
-        html_file.write_text(resp.text, encoding="utf-8", errors="replace")
-
-        # ── Extract page text ──
-        title = soup.title.string.strip() if soup.title and soup.title.string else ""
-        clean_text = extract_clean_text(soup)
-        pages_rows.append({
-            "url":        url,
-            "page_title": title,
-            "depth":      depth,
-            "clean_text": clean_text,
-        })
-
-        # ── Process images ──
-        for img_tag in soup.find_all("img"):
-            relevant, img_url = is_relevant_image(img_tag, url)
-            if not relevant:
-                continue
-
-            img_data = download_and_filter_image(img_url, session)
-            if img_data is None:
-                continue
-
-            # Deduplicate by content hash
-            img_hash = hashlib.md5(img_data).hexdigest()
-            if img_hash in image_hashes:
-                continue
-            image_hashes.add(img_hash)
-
-            # Save image
-            ext = Path(urllib.parse.urlparse(img_url).path).suffix.lower() or ".jpg"
-            img_filename = f"{img_hash[:12]}{ext}"
-            img_path = images_dir / img_filename
-            img_path.write_bytes(img_data)
-
-            # OCR
-            ocr_text = run_ocr(ocr_tuple, img_path)
-            ocr_rows.append({
-                "image_path":      str(img_path.relative_to(site_dir)),
-                "image_url":       img_url,
-                "source_page_url": url,
-                "extracted_text":  ocr_text,
-            })
-            log.debug(f"      Image saved: {img_filename}")
-
-        # ── Enqueue internal links ──
-        if depth < MAX_DEPTH:
-            for a_tag in soup.find_all("a", href=True):
-                href = a_tag["href"].strip()
-                abs_href = urllib.parse.urljoin(url, href)
-                abs_href = normalise_url(abs_href)
-                if same_domain(abs_href, base_domain) and abs_href not in visited:
-                    queue.append((abs_href, depth + 1))
-
-    # ── Write CSVs ──
     pages_csv = site_dir / "pages_text.csv"
     ocr_csv   = site_dir / "ocr_output.csv"
 
-    pd.DataFrame(pages_rows).to_csv(pages_csv, index=False, encoding="utf-8")
-    pd.DataFrame(ocr_rows).to_csv(ocr_csv,   index=False, encoding="utf-8")
+    # Open CSVs for incremental writing
+    pages_file = open(pages_csv, "w", newline="", encoding="utf-8")
+    ocr_file   = open(ocr_csv,   "w", newline="", encoding="utf-8")
+    pages_writer = csv.DictWriter(pages_file, fieldnames=["url", "page_title", "depth", "clean_text"])
+    ocr_writer   = csv.DictWriter(ocr_file,   fieldnames=["image_path", "image_url", "source_page_url", "extracted_text"])
+    pages_writer.writeheader()
+    ocr_writer.writeheader()
 
-    log.info(f"  Done: {len(pages_rows)} pages, {len(ocr_rows)} images with OCR → {site_dir.name}")
+    log.info(f"  Starting crawl: {start_url}  (max depth={MAX_DEPTH})")
+
+    try:
+        while queue:
+            url, depth = queue.popleft()
+            norm = normalise_url(url)
+
+            if norm in visited:
+                continue
+            if depth > MAX_DEPTH:
+                continue
+
+            visited.add(norm)
+
+            try:
+                time.sleep(REQUEST_DELAY)
+                resp = session.get(url, timeout=REQUEST_TIMEOUT)
+                resp.raise_for_status()
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/html" not in content_type:
+                    continue
+            except Exception as e:
+                log.debug(f"    Skip {url}: {e}")
+                continue
+
+            log.info(f"    [{depth}] {url}")
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            # ── Save raw HTML ──
+            html_file = pages_dir / f"{slug_from_url(url)}.html"
+            html_file.write_text(resp.text, encoding="utf-8", errors="replace")
+
+            # ── Extract and write page text immediately ──
+            title = soup.title.string.strip() if soup.title and soup.title.string else ""
+            clean_text = extract_clean_text(soup)
+            pages_writer.writerow({
+                "url":        url,
+                "page_title": title,
+                "depth":      depth,
+                "clean_text": clean_text,
+            })
+            pages_file.flush()
+            pages_count += 1
+
+            # ── Process and write images immediately ──
+            for img_tag in soup.find_all("img"):
+                relevant, img_url = is_relevant_image(img_tag, url)
+                if not relevant:
+                    continue
+
+                img_data = download_and_filter_image(img_url, session)
+                if img_data is None:
+                    continue
+
+                img_hash = hashlib.md5(img_data).hexdigest()
+                if img_hash in image_hashes:
+                    continue
+                image_hashes.add(img_hash)
+
+                ext = Path(urllib.parse.urlparse(img_url).path).suffix.lower() or ".jpg"
+                img_filename = f"{img_hash[:12]}{ext}"
+                img_path = images_dir / img_filename
+                img_path.write_bytes(img_data)
+
+                ocr_text = run_ocr(ocr_tuple, img_path)
+                ocr_writer.writerow({
+                    "image_path":      str(img_path.relative_to(site_dir)),
+                    "image_url":       img_url,
+                    "source_page_url": url,
+                    "extracted_text":  ocr_text,
+                })
+                ocr_file.flush()
+                ocr_count += 1
+                log.debug(f"      Image saved: {img_filename}")
+
+            # ── Enqueue internal links ──
+            if depth < MAX_DEPTH:
+                for a_tag in soup.find_all("a", href=True):
+                    href = a_tag["href"].strip()
+                    abs_href = urllib.parse.urljoin(url, href)
+                    abs_href = normalise_url(abs_href)
+                    if same_domain(abs_href, base_domain) and abs_href not in visited:
+                        queue.append((abs_href, depth + 1))
+    finally:
+        pages_file.close()
+        ocr_file.close()
+
+    log.info(f"  Done: {pages_count} pages, {ocr_count} images with OCR → {site_dir.name}")
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
