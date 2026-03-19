@@ -1,4 +1,8 @@
 sites/*
+old/*
+output/*
+.marscode
+saved_chat
 
 .env
 

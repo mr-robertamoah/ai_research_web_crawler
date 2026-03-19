@@ -13,11 +13,19 @@ services:
       OCR_ENGINE: ${OCR_ENGINE:-easyocr}
       # Optional: force a specific input file name
       INPUT_FILE: ${INPUT_FILE:-}
+      # Ollama
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://172.22.0.1:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      # Groq
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-qwen/qwen3-32b}
     volumes:
       # Mount your input file(s) from the project root into the container
       - .:/app/input:ro
       # Output: sites folder is written to ./sites on your host machine
       - ./sites:/app/sites
+      # Analysis output (CSVs, Excel workbooks)
+      - ./output:/app/output
     working_dir: /app
     # Keep container running so you can exec commands (scrape or manual ingest)
     command: >
