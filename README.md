@@ -1,17 +1,17 @@
-# Amalitech Competitor Research Scraper
+# AmaliTech Competitor Intelligence Pipeline
 
-A deep-crawl scraper that collects competitor website content — page text and relevant images — and runs OCR on images to extract structured text. Results are saved in versioned, timestamped folders for each competitor site.
+A two-stage pipeline that (1) deep-crawls competitor websites and (2) uses an LLM to extract, score, and prioritise AI services — producing Excel and Markdown outputs to inform AmaliTech's AI service portfolio strategy.
 
 ---
 
 ## Table of Contents
 
 - [Project Structure](#project-structure)
-- [Input File Format](#input-file-format)
-- [Output Structure](#output-structure)
-- [Option A: Run Locally (Python)](#option-a-run-locally-python)
-- [Option B: Run with Docker](#option-b-run-with-docker)
+- [Stage 1 — Scraper](#stage-1--scraper)
+- [Stage 2 — Analysis (Groq)](#stage-2--analysis-groq)
+- [Running with Docker](#running-with-docker)
 - [Environment Variables](#environment-variables)
+- [Output Files](#output-files)
 - [Tips & Troubleshooting](#tips--troubleshooting)
 
 ---
@@ -20,340 +20,226 @@ A deep-crawl scraper that collects competitor website content — page text and 
 
 ```
 project/
-├── scraper.py            # Main scraper script
+├── scraper.py            # Stage 1 — web crawler
+├── analyse_groq.py       # Stage 2 — LLM extraction, scoring, Excel/MD output
+├── manual_ingest.py      # Optional — ingest screenshots / text files
 ├── requirements.txt      # Python dependencies
-├── Dockerfile            # Docker image definition
-├── docker-compose.yml    # Docker Compose configuration
-├── README.md             # This file
-├── competitors.csv       # Your input file (CSV or TXT)
-└── sites/                # Output folder — auto-created on first run
-    └── accenture-com_2025-03-16_14-30-00/
-        ├── pages/
-        ├── images/
-        ├── pages_text.csv
-        └── ocr_output.csv
+├── Dockerfile
+├── docker-compose.yml
+├── competitors.csv       # Input: one URL per row
+├── sites/                # Scraper output (one timestamped folder per competitor)
+└── output/               # Analysis output (Excel, CSV, Markdown, state files)
 ```
 
 ---
 
-## Input File Format
+## Stage 1 — Scraper
 
-Place a `.csv` or `.txt` file in the **same directory as `scraper.py`**.
+`scraper.py` deep-crawls each URL in `competitors.csv`, saves page text and images, and runs OCR. Results go into `sites/<domain>_<timestamp>/`.
 
-### CSV format
-The script auto-detects the URL column. Any of these column names will work:
-`url`, `website`, `site`, `link`, `domain`, `competitor_url`
+### Input format
 
-You can have other columns — they will be ignored.
+`competitors.csv` — auto-detects the URL column (`url`, `website`, `site`, `link`, `domain`, `competitor_url`):
 
 ```csv
-competitor_name,website,region
-Accenture,https://www.accenture.com,Global
-McKinsey,https://www.mckinsey.com,Global
-Deloitte,https://www2.deloitte.com,Global
+competitor_name,website
+Accenture,https://www.accenture.com
+Nearshore,https://www.nearshore.com
 ```
 
-### TXT format
-One URL per line. Lines starting with `#` are ignored (use for comments).
+Or a plain `.txt` file with one URL per line (lines starting with `#` are ignored).
 
-```
-# Global consultancies
-https://www.accenture.com
-https://www.mckinsey.com
-
-# Regional competitors
-https://www.example-africa-ai.com
-```
-
----
-
-## Output Structure
-
-Each run creates a **new timestamped folder** per site, preserving history across runs.
-
-```
-sites/
-└── accenture-com_2025-03-16_14-30-00/
-    ├── pages/
-    │   ├── index.html
-    │   ├── services_ai.html
-    │   └── about.html
-    ├── images/
-    │   ├── a1b2c3d4e5f6.jpg
-    │   └── 7890abcdef12.png
-    ├── pages_text.csv     ← one row per crawled page
-    └── ocr_output.csv     ← one row per image with extracted text
-```
-
-### `pages_text.csv` columns
-
-| Column | Description |
-|---|---|
-| `url` | Full URL of the crawled page |
-| `page_title` | HTML `<title>` of the page |
-| `depth` | Crawl depth (0 = starting URL) |
-| `clean_text` | Cleaned readable text extracted from the page |
-
-### `ocr_output.csv` columns
-
-| Column | Description |
-|---|---|
-| `image_path` | Relative path to the saved image file |
-| `image_url` | Original URL the image was downloaded from |
-| `source_page_url` | The page on which this image was found |
-| `extracted_text` | Text extracted from the image via OCR |
-
----
-
-## Option A: Run Locally (Python)
-
-### 1. Prerequisites
-
-- Python 3.10 or higher
-- `pip`
-
-For `pytesseract` (optional): install [Tesseract OCR](https://github.com/tesseract-ocr/tesseract#installing-tesseract) on your system.
-- **Ubuntu/Debian:** `sudo apt install tesseract-ocr tesseract-ocr-eng`
-- **macOS:** `brew install tesseract`
-- **Windows:** Download the installer from the Tesseract GitHub releases page.
-
-### 2. Install dependencies
-
-From the project folder, run:
+### Run locally
 
 ```bash
 pip install -r requirements.txt
-```
-
-> **Note:** `easyocr` will download its English language model (~100MB) on first use.
-> This only happens once and is cached locally.
-
-### 3. Add your input file
-
-Place your `competitors.csv` or `competitors.txt` in the project folder.
-
-### 4. Run the scraper
-
-**Basic run (all defaults):**
-```bash
 python scraper.py
 ```
 
-**With custom depth:**
-```bash
-MAX_DEPTH=5 python scraper.py
-```
-
-**Switch to pytesseract:**
-```bash
-OCR_ENGINE=pytesseract python scraper.py
-```
-
-**Force a specific input file:**
-```bash
-INPUT_FILE=my_list.csv python scraper.py
-```
-
-**Combine multiple options:**
-```bash
-MAX_DEPTH=4 OCR_ENGINE=pytesseract INPUT_FILE=competitors.csv python scraper.py
-```
-
-**Windows (Command Prompt):**
-```cmd
-set MAX_DEPTH=4 && set OCR_ENGINE=easyocr && python scraper.py
-```
-
-**Windows (PowerShell):**
-```powershell
-$env:MAX_DEPTH="4"; $env:OCR_ENGINE="easyocr"; python scraper.py
-```
-
-### 5. View results
-
-Results are saved in the `sites/` folder in the project directory.
-
----
-
-## Option B: Run with Docker
-
-### 1. Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- Docker Compose (included with Docker Desktop)
-
-### 2. Add your input file
-
-Place your `competitors.csv` or `competitors.txt` in the **project root** (same folder as `docker-compose.yml`).
-
-### 3. Build the Docker image
-
-This only needs to be done once, or again after any code changes:
-
-```bash
-docker compose build
-```
-
-> **Note:** The build downloads and caches the EasyOCR model inside the image.
-> This makes subsequent runs fast. The build may take 3–5 minutes on first run.
-
-### 4. Start the container (idle)
-
-The container stays running so you can execute commands on demand.
+### Run in Docker
 
 ```bash
 docker compose up -d
+docker compose exec scraper python scraper.py
+# With options:
+docker compose exec -e MAX_DEPTH=5 scraper python scraper.py
 ```
 
-### 5. Run commands with `exec`
+### Scraper environment variables
 
-**Scrape (all defaults):**
+| Variable | Default | Description |
+|---|---|---|
+| `MAX_DEPTH` | `3` | Link depth to crawl from the starting URL |
+| `OCR_ENGINE` | `easyocr` | `easyocr` or `pytesseract` |
+| `INPUT_FILE` | _(auto-detect)_ | Force a specific input file |
+
+### Output per competitor
+
+```
+sites/accenture-com_2025-03-16_14-30-00/
+├── pages/                 ← saved HTML files
+├── images/                ← downloaded images
+├── pages_text.csv         ← one row per page (url, page_title, depth, clean_text)
+└── ocr_output.csv         ← one row per image (image_path, image_url, source_page_url, extracted_text)
+```
+
+---
+
+## Stage 2 — Analysis (Groq)
+
+`analyse_groq.py` reads the scraped `sites/` folders and for each competitor:
+
+1. **Extracts** AI services using `llama-3.1-8b-instant` via the Groq API
+2. **Scores** each service across 5 dimensions against AmaliTech's strategic context
+3. **Assesses** 5 strategic hypotheses (pricing, partnerships, verticals, etc.)
+4. **Writes** per-competitor Excel workbooks + a consolidated long-list workbook + a Markdown summary
+
+### Scoring dimensions
+
+| Dimension | Weight | What it measures |
+|---|---|---|
+| Strategic Fit | 30% | Alignment with AmaliTech's target industries and capabilities |
+| Market Impact | 25% | Revenue potential and market size |
+| Effort | 20% | Delivery feasibility (now / 6-12mo / 1-2yr roadmap) |
+| Differentiation | 15% | Uniqueness vs. competitors |
+| Market Credibility | 10% | Client trust signals, certifications, partnerships |
+
+### Run (Docker — recommended)
+
+```bash
+docker compose exec \
+  -e GROQ_API_KEY=<your_key> \
+  -e GROQ_MODEL=llama-3.1-8b-instant \
+  -e APP_DIR=/app \
+  scraper python3 /app/input/analyse_groq.py
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--rerun-all` | Clear state and reprocess all competitors |
+| `--competitor <name>` | Process only one competitor (fuzzy match on folder name) |
+| `--max-pages <n>` | Limit pages read per competitor (default: 50) |
+| `--dry-run` | Show what would be processed without calling the API |
+
+### Groq rate limits (free tier)
+
+- 6,000 tokens/minute for `llama-3.1-8b-instant`
+- The script retries with exponential backoff (`15 × attempt` seconds) and truncates content to stay within limits
+- Content is sampled using AI-keyword-weighted page selection so relevant pages are always included even in large scrapes
+
+---
+
+## Running with Docker
+
+### First-time setup
+
+```bash
+docker compose build   # ~3-5 min (downloads EasyOCR model)
+docker compose up -d
+```
+
+### Scrape all competitors
+
 ```bash
 docker compose exec scraper python scraper.py
 ```
 
-**With custom depth:**
+### Run analysis
+
 ```bash
-docker compose exec -e MAX_DEPTH=5 scraper python scraper.py
+docker compose exec \
+  -e GROQ_API_KEY=<your_key> \
+  -e GROQ_MODEL=llama-3.1-8b-instant \
+  -e APP_DIR=/app \
+  scraper python3 /app/input/analyse_groq.py
 ```
 
-**Switch to pytesseract:**
-```bash
-docker compose exec -e OCR_ENGINE=pytesseract scraper python scraper.py
-```
+### Manual ingest (screenshots / LinkedIn posts)
 
-**Manual ingest (screenshots/texts):**
+Place files under `manual/<competitor_name>/images/` and/or `manual/<competitor_name>/texts/`, then:
+
 ```bash
 docker compose exec scraper python manual_ingest.py
-```
-
-**Manual ingest for a single competitor:**
-```bash
+# Single competitor:
 docker compose exec -e COMPETITOR=acme scraper python manual_ingest.py
 ```
 
-### 6. View results
-
-Results are written to the `sites/` folder in your project directory on your host machine — the same as the local option. Docker mounts this folder automatically.
-
-### 7. Stop / clean up
+### Stop / clean up
 
 ```bash
-# Stop the container
 docker compose down
-
-# Remove the built image to free disk space (optional)
-docker compose down --rmi all
+docker compose down --rmi all   # also removes the built image
 ```
-
-### Re-running after code changes
-
-If you edit `scraper.py` or `manual_ingest.py`, rebuild before running:
-
-```bash
-docker compose build && docker compose up
-```
-
----
-
-## Manual Screenshots Ingest (LinkedIn, etc.)
-
-If you capture **screenshots and/or text files** (e.g., LinkedIn posts) and want them structured into CSVs, use the manual ingest flow.
-
-### 1. Recommended input layout
-
-```
-manual/
-├── <competitor_name>/
-│   ├── images/
-│   │   ├── post-01.png
-│   │   └── post-02.jpg
-│   └── texts/
-│       ├── post-01.txt
-│       └── post-02.txt
-```
-
-**Matching rule:** files are paired by filename stem (e.g., `post-01.png` ↔ `post-01.txt`).
-
-### 2. Run locally (Python)
-
-```bash
-python manual_ingest.py
-```
-
-**Process a single competitor:**
-```bash
-COMPETITOR=acme python manual_ingest.py
-```
-
-### 3. Run in Docker
-
-Place your `manual/` folder in the project root, then run:
-
-```bash
-docker compose run --rm scraper python manual_ingest.py
-```
-
-### 4. Output structure
-
-Each competitor produces a separate output folder under `sites/`:
-
-```
-sites/
-└── <competitor>_manual_YYYY-MM-DD_HH-MM-SS/
-    ├── images/
-    ├── texts/
-    ├── ocr_output.csv
-    └── posts_text.csv
-```
-
-### Manual ingest environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `MANUAL_DIR` | `./manual` (auto-detect) | Input root containing competitor folders |
-| `OUTPUT_DIR` | `./sites` | Where output folders are written |
-| `COMPETITOR` | _(all)_ | Process only one competitor folder |
-| `OCR_ENGINE` | `easyocr` | OCR engine to use: `easyocr` or `pytesseract` |
-| `SKIP_OCR` | _unset_ | Set to `1` to skip OCR |
 
 ---
 
 ## Environment Variables
 
+### Analysis (`analyse_groq.py`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | Yes | Groq API key |
+| `GROQ_MODEL` | No | Model name (default: `llama-3.1-8b-instant`) |
+| `APP_DIR` | No | Base path for outputs (default: script directory). Set to `/app` in Docker. |
+
+### Manual ingest
+
 | Variable | Default | Description |
 |---|---|---|
-| `MAX_DEPTH` | `3` | How many link levels deep to crawl from the starting URL |
-| `OCR_ENGINE` | `easyocr` | OCR engine to use: `easyocr` or `pytesseract` |
-| `INPUT_FILE` | _(auto-detect)_ | Force a specific input filename (e.g. `competitors.csv`) |
+| `MANUAL_DIR` | `./manual` | Input root containing competitor folders |
+| `OUTPUT_DIR` | `./sites` | Where output folders are written |
+| `COMPETITOR` | _(all)_ | Process only one competitor folder |
+| `OCR_ENGINE` | `easyocr` | `easyocr` or `pytesseract` |
+| `SKIP_OCR` | _unset_ | Set to `1` to skip OCR |
+
+---
+
+## Output Files
+
+All analysis outputs go to `output/`:
+
+| File | Description |
+|---|---|
+| `<competitor>_services_scored_groq.xlsx` | Per-competitor workbook with scored services |
+| `YYYYMMDD_initiative_long_list_groq.xlsx` | Consolidated workbook: long list + comparison matrix + hypothesis tracker |
+| `YYYYMMDD_services_summary_groq.md` | Markdown summary grouped by competitor |
+| `all_competitors_priority_groq.csv` | Flat CSV of all scored services |
+| `processed_folders_groq.json` | State file — tracks which folders have been processed |
+| `hypothesis_tracker_groq.json` | Raw hypothesis assessment results |
+
+### Excel sheets in the long-list workbook
+
+- **Long List** — all services ranked by priority score, with tier, plain-English summary, pricing signals, client wins, tech stack, data confidence
+- **Comparison Matrix** — one row per competitor with average scores per dimension
+- **Hypothesis Tracker** — evidence for/against each of the 5 strategic hypotheses, colour-coded by verdict
 
 ---
 
 ## Tips & Troubleshooting
 
-**The script found multiple input files**
-If you have more than one CSV or TXT in the folder, it will use the first one it finds alphabetically and warn you. Use `INPUT_FILE=yourfile.csv` to be explicit.
+**A competitor returns 0 services**
+The extraction uses AI-keyword-weighted page sampling to ensure relevant pages are included even when they appear deep in the scraped content. If a competitor still returns 0 services, the scrape itself may be thin — check `sites/<folder>/pages_text.csv` for content. Consider re-scraping or using manual ingest.
 
-**A site is being skipped or returning errors**
-Some sites block automated requests. The script will log the error and move on without crashing. You can check the logs for `Skip` messages. Try increasing `REQUEST_DELAY` in `scraper.py` if many sites are blocking you.
+**Groq 429 rate limit errors**
+These are expected on the free tier and are handled automatically with retry backoff. The run will slow down but complete. Upgrade to a paid Groq tier or switch to a model with higher TPM limits to speed things up.
 
-**EasyOCR is slow on first run**
-EasyOCR downloads its language model (~100MB) on first use if not already cached. In Docker, this is handled at build time. Locally, it caches in `~/.EasyOCR/`.
+**JSON parse errors in LLM output**
+The parser handles: markdown code fences, `<think>` blocks, pipe-separated enum values, and truncated arrays. If a competitor still fails, re-run with `--competitor <name>` to retry just that one.
 
-**No images are being saved**
-Images must be at least 100×100px and inside a content tag (`<article>`, `<section>`, `<main>`, `<div>`). Logos, icons, and decorative images are filtered out by design. If you want to lower the size threshold, edit `MIN_IMAGE_WIDTH` and `MIN_IMAGE_HEIGHT` in `scraper.py`.
+**Scraper skipping sites or returning errors**
+Some sites block automated requests. Check logs for `Skip` messages. Try increasing `REQUEST_DELAY` in `scraper.py`.
 
-**OCR text is empty or poor quality**
-- Make sure the image is high resolution (low-res screenshots will produce poor results)
-- Try switching OCR engines: `OCR_ENGINE=pytesseract` sometimes performs better on certain image types
-- Check that Tesseract is correctly installed if using `pytesseract`
+**EasyOCR slow on first local run**
+EasyOCR downloads its model (~100MB) on first use. In Docker this is cached at build time.
 
 **Running on Windows locally**
-Use PowerShell to set environment variables:
 ```powershell
 $env:MAX_DEPTH="5"; python scraper.py
 ```
 
 ---
 
-*Amalitech Benchmarking Team — Internal Research Tooling*
+*AmaliTech Benchmarking Team — Internal Research Tooling*
