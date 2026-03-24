@@ -26,6 +26,10 @@ services:
       - ./sites:/app/sites
       # Analysis output (CSVs, Excel workbooks)
       - ./output:/app/output
+      # Legacy scraper output
+      - ./legacy:/app/legacy
+      # Legacy analysis output
+      - ./legacy_output:/app/legacy_output
     working_dir: /app
     # Keep container running so you can exec commands (scrape or manual ingest)
     command: >
