@@ -2,13 +2,17 @@
 
 A two-stage pipeline that (1) deep-crawls competitor websites and (2) uses an LLM to extract, score, and prioritise AI services — producing Excel and Markdown outputs to inform AmaliTech's AI service portfolio strategy.
 
+A separate **Legacy Modernisation pipeline** (stages 3 & 4) crawls legacy/mainframe modernisation sources and produces a scored long list answering the pillar lead's four research questions.
+
 ---
 
 ## Table of Contents
 
 - [Project Structure](#project-structure)
-- [Stage 1 — Scraper](#stage-1--scraper)
-- [Stage 2 — Analysis (Groq)](#stage-2--analysis-groq)
+- [Stage 1 — Competitor Scraper](#stage-1--competitor-scraper)
+- [Stage 2 — Competitor Analysis (Groq)](#stage-2--competitor-analysis-groq)
+- [Stage 3 — Legacy Scraper](#stage-3--legacy-scraper)
+- [Stage 4 — Legacy Analysis](#stage-4--legacy-analysis)
 - [Running with Docker](#running-with-docker)
 - [Environment Variables](#environment-variables)
 - [Output Files](#output-files)
@@ -20,20 +24,25 @@ A two-stage pipeline that (1) deep-crawls competitor websites and (2) uses an LL
 
 ```
 project/
-├── scraper.py            # Stage 1 — web crawler
-├── analyse_groq.py       # Stage 2 — LLM extraction, scoring, Excel/MD output
-├── manual_ingest.py      # Optional — ingest screenshots / text files
-├── requirements.txt      # Python dependencies
+├── scraper.py                      # Stage 1 — competitor web crawler
+├── analyse_groq.py                 # Stage 2 — competitor LLM analysis
+├── legacy_scraper.py               # Stage 3 — legacy modernisation web crawler
+├── legacy_analyse.py               # Stage 4 — legacy LLM analysis (Groq or Claude)
+├── manual_ingest.py                # Optional — ingest screenshots / text files
+├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-├── competitors.csv       # Input: one URL per row
-├── sites/                # Scraper output (one timestamped folder per competitor)
-└── output/               # Analysis output (Excel, CSV, Markdown, state files)
+├── competitors.csv                 # Input for Stage 1
+├── legacy_modernization_urls.txt   # Input for Stage 3
+├── sites/                          # Stage 1 output
+├── output/                         # Stage 2 output
+├── legacy/                         # Stage 3 output
+└── legacy_output/                  # Stage 4 output
 ```
 
 ---
 
-## Stage 1 — Scraper
+## Stage 1 — Competitor Scraper
 
 `scraper.py` deep-crawls each URL in `competitors.csv`, saves page text and images, and runs OCR. Results go into `sites/<domain>_<timestamp>/`.
 
@@ -49,23 +58,15 @@ Nearshore,https://www.nearshore.com
 
 Or a plain `.txt` file with one URL per line (lines starting with `#` are ignored).
 
-### Run locally
-
-```bash
-pip install -r requirements.txt
-python scraper.py
-```
-
 ### Run in Docker
 
 ```bash
-docker compose up -d
 docker compose exec scraper python scraper.py
 # With options:
 docker compose exec -e MAX_DEPTH=5 scraper python scraper.py
 ```
 
-### Scraper environment variables
+### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
@@ -77,34 +78,24 @@ docker compose exec -e MAX_DEPTH=5 scraper python scraper.py
 
 ```
 sites/accenture-com_2025-03-16_14-30-00/
-├── pages/                 ← saved HTML files
-├── images/                ← downloaded images
-├── pages_text.csv         ← one row per page (url, page_title, depth, clean_text)
-└── ocr_output.csv         ← one row per image (image_path, image_url, source_page_url, extracted_text)
+├── pages/           ← saved HTML files
+├── images/          ← downloaded images
+├── pages_text.csv   ← one row per page (url, page_title, depth, clean_text)
+└── ocr_output.csv   ← one row per image
 ```
 
 ---
 
-## Stage 2 — Analysis (Groq)
+## Stage 2 — Competitor Analysis (Groq)
 
-`analyse_groq.py` reads the scraped `sites/` folders and for each competitor:
+`analyse_groq.py` reads `sites/` folders and for each competitor:
 
 1. **Extracts** AI services using `llama-3.1-8b-instant` via the Groq API
-2. **Scores** each service across 5 dimensions against AmaliTech's strategic context
-3. **Assesses** 5 strategic hypotheses (pricing, partnerships, verticals, etc.)
-4. **Writes** per-competitor Excel workbooks + a consolidated long-list workbook + a Markdown summary
+2. **Scores** each service across 7 dimensions against AmaliTech's strategic context
+3. **Assesses** strategic hypotheses
+4. **Writes** per-competitor Excel workbooks + consolidated long-list + Markdown summary
 
-### Scoring dimensions
-
-| Dimension | Weight | What it measures |
-|---|---|---|
-| Strategic Fit | 30% | Alignment with AmaliTech's target industries and capabilities |
-| Market Impact | 25% | Revenue potential and market size |
-| Effort | 20% | Delivery feasibility (now / 6-12mo / 1-2yr roadmap) |
-| Differentiation | 15% | Uniqueness vs. competitors |
-| Market Credibility | 10% | Client trust signals, certifications, partnerships |
-
-### Run (Docker — recommended)
+### Run (Docker)
 
 ```bash
 docker compose exec \
@@ -114,20 +105,129 @@ docker compose exec \
   scraper python3 /app/input/analyse_groq.py
 ```
 
-**Options:**
-
 | Flag | Description |
 |---|---|
 | `--rerun-all` | Clear state and reprocess all competitors |
-| `--competitor <name>` | Process only one competitor (fuzzy match on folder name) |
+| `--competitor <name>` | Process only one competitor (fuzzy match) |
 | `--max-pages <n>` | Limit pages read per competitor (default: 50) |
 | `--dry-run` | Show what would be processed without calling the API |
 
-### Groq rate limits (free tier)
+---
 
-- 6,000 tokens/minute for `llama-3.1-8b-instant`
-- The script retries with exponential backoff (`15 × attempt` seconds) and truncates content to stay within limits
-- Content is sampled using AI-keyword-weighted page selection so relevant pages are always included even in large scrapes
+## Stage 3 — Legacy Scraper
+
+`legacy_scraper.py` crawls URLs in `legacy_modernization_urls.txt` — covering AI-assisted COBOL/mainframe modernisation providers, tools, platforms, and research. Output goes to `legacy/`.
+
+Key features:
+- **Checkpoint system** — saves progress after every URL; interrupted runs resume automatically
+- **`MAX_SITE_MINUTES`** — caps time spent per site then moves to the next; checkpoint preserves progress for later resume
+- **Incremental writes** — flushes CSV after every page (crash-safe)
+- **Relevance scoring** — pages scored by keyword hits; low-relevance pages skipped
+
+### Input format
+
+`legacy_modernization_urls.txt` — one URL per line, `#` lines ignored. Organised by category (service providers, AI tools, research, Java migration).
+
+To scrape only a subset (e.g. corrections), create a separate `.txt` file and pass it via `INPUT_FILE`:
+
+```bash
+docker compose exec -e INPUT_FILE=corrections_urls.txt \
+  -e MAX_SITE_MINUTES=60 -e LEGACY_DIR=/app/legacy \
+  scraper python3 /app/input/legacy_scraper.py
+```
+
+### Run (Docker)
+
+```bash
+docker compose exec \
+  -e MAX_SITE_MINUTES=60 \
+  -e MAX_DEPTH=2 \
+  -e MIN_RELEVANCE=1 \
+  -e LEGACY_DIR=/app/legacy \
+  scraper python3 /app/input/legacy_scraper.py
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAX_DEPTH` | `2` | Link depth to crawl |
+| `MIN_RELEVANCE` | `2` | Min keyword hits to save a page |
+| `MAX_SITE_MINUTES` | `0` | Max minutes per site (0 = unlimited) |
+| `LEGACY_DIR` | `/app/legacy` | Output directory |
+| `INPUT_FILE` | _(auto-detect)_ | Override input URL file |
+| `FRESH` | `0` | Set to `1` to ignore checkpoints and re-crawl |
+| `OCR` | `0` | Set to `1` to enable OCR on images |
+| `OCR_ENGINE` | `easyocr` | `easyocr` or `pytesseract` |
+
+### Output per site
+
+```
+legacy/www-ibm-com_2026-03-24_08-27-53/
+├── pages/           ← saved HTML files
+├── pages_text.csv   ← one row per page (url, title, depth, relevance_score, keyword_hits, clean_text)
+└── checkpoint.json  ← visited URLs — enables resume on restart
+```
+
+---
+
+## Stage 4 — Legacy Analysis
+
+`legacy_analyse.py` reads `legacy/` folders and for each source:
+
+1. **Extracts** legacy modernisation services/tools/products
+2. **Scores** each across 7 dimensions (market impact, effort, scalability, revenue potential, market credibility, talent availability, strategic fit)
+3. **Generates** a research brief answering the pillar lead's 4 questions:
+   - Who is doing AI-assisted legacy/mainframe/COBOL modernisation?
+   - Does it work — what is the maturity level?
+   - What state-of-the-art tools and approaches exist (including academic)?
+   - Java 8/11 → 17/21 migration using AI as a supportive hand
+4. **Writes** per-source Excel workbooks + consolidated long-list + Markdown research brief
+
+Supports **Groq** (default) or **Claude** as the AI backend.
+
+### Run (Docker)
+
+```bash
+# Groq (default)
+docker compose exec \
+  -e GROQ_API_KEY=<your_key> \
+  -e GROQ_MODEL=llama-3.1-8b-instant \
+  -e APP_DIR=/app \
+  -e LEGACY_DIR=/app/legacy \
+  -e LEGACY_OUTPUT_DIR=/app/legacy_output \
+  scraper python3 /app/input/legacy_analyse.py --max-pages 5
+
+# Claude
+docker compose exec \
+  -e AI_BACKEND=claude \
+  -e ANTHROPIC_API_KEY=<your_key> \
+  -e APP_DIR=/app \
+  -e LEGACY_DIR=/app/legacy \
+  -e LEGACY_OUTPUT_DIR=/app/legacy_output \
+  scraper python3 /app/input/legacy_analyse.py --max-pages 5
+```
+
+| Flag | Description |
+|---|---|
+| `--rerun-all` | Clear state and reprocess all sources |
+| `--source <name>` | Process only one source (fuzzy match) |
+| `--max-pages <n>` | Limit pages read per source (default: 40; use 5 on Groq free tier) |
+| `--dry-run` | Show pending sources without calling the API |
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `AI_BACKEND` | `groq` | `groq` or `claude` |
+| `GROQ_API_KEY` | — | Required if `AI_BACKEND=groq` |
+| `GROQ_MODEL` | `qwen/qwen3-32b` | Groq model name |
+| `ANTHROPIC_API_KEY` | — | Required if `AI_BACKEND=claude` |
+| `LEGACY_DIR` | `/app/legacy` | Input: legacy scraper output |
+| `LEGACY_OUTPUT_DIR` | `/app/legacy_output` | Output directory |
+| `APP_DIR` | script dir | Base path (set to `/app` in Docker) |
+
+> **Groq free tier note**: Use `--max-pages 5` to stay within the 6,000 TPM limit. The script retries automatically on 429 errors.
 
 ---
 
@@ -140,29 +240,26 @@ docker compose build   # ~3-5 min (downloads EasyOCR model)
 docker compose up -d
 ```
 
-### Scrape all competitors
+### Full legacy pipeline
 
 ```bash
-docker compose exec scraper python scraper.py
-```
-
-### Run analysis
-
-```bash
+# Step 1 — scrape
 docker compose exec \
-  -e GROQ_API_KEY=<your_key> \
-  -e GROQ_MODEL=llama-3.1-8b-instant \
-  -e APP_DIR=/app \
-  scraper python3 /app/input/analyse_groq.py
+  -e MAX_SITE_MINUTES=60 -e MAX_DEPTH=2 -e MIN_RELEVANCE=1 \
+  -e LEGACY_DIR=/app/legacy \
+  scraper python3 /app/input/legacy_scraper.py
+
+# Step 2 — analyse
+docker compose exec \
+  -e GROQ_API_KEY=<your_key> -e GROQ_MODEL=llama-3.1-8b-instant \
+  -e APP_DIR=/app -e LEGACY_DIR=/app/legacy -e LEGACY_OUTPUT_DIR=/app/legacy_output \
+  scraper python3 /app/input/legacy_analyse.py --max-pages 5
 ```
 
 ### Manual ingest (screenshots / LinkedIn posts)
 
-Place files under `manual/<competitor_name>/images/` and/or `manual/<competitor_name>/texts/`, then:
-
 ```bash
 docker compose exec scraper python manual_ingest.py
-# Single competitor:
 docker compose exec -e COMPETITOR=acme scraper python manual_ingest.py
 ```
 
@@ -170,74 +267,55 @@ docker compose exec -e COMPETITOR=acme scraper python manual_ingest.py
 
 ```bash
 docker compose down
-docker compose down --rmi all   # also removes the built image
+docker compose down --rmi all
 ```
-
----
-
-## Environment Variables
-
-### Analysis (`analyse_groq.py`)
-
-| Variable | Required | Description |
-|---|---|---|
-| `GROQ_API_KEY` | Yes | Groq API key |
-| `GROQ_MODEL` | No | Model name (default: `llama-3.1-8b-instant`) |
-| `APP_DIR` | No | Base path for outputs (default: script directory). Set to `/app` in Docker. |
-
-### Manual ingest
-
-| Variable | Default | Description |
-|---|---|---|
-| `MANUAL_DIR` | `./manual` | Input root containing competitor folders |
-| `OUTPUT_DIR` | `./sites` | Where output folders are written |
-| `COMPETITOR` | _(all)_ | Process only one competitor folder |
-| `OCR_ENGINE` | `easyocr` | `easyocr` or `pytesseract` |
-| `SKIP_OCR` | _unset_ | Set to `1` to skip OCR |
 
 ---
 
 ## Output Files
 
-All analysis outputs go to `output/`:
+### Competitor analysis (`output/`)
 
 | File | Description |
 |---|---|
-| `<competitor>_services_scored_groq.xlsx` | Per-competitor workbook with scored services |
-| `YYYYMMDD_initiative_long_list_groq.xlsx` | Consolidated workbook: long list + comparison matrix + hypothesis tracker |
+| `<competitor>_services_scored_groq.xlsx` | Per-competitor scored workbook |
+| `YYYYMMDD_initiative_long_list_groq.xlsx` | Consolidated long list + comparison matrix + hypothesis tracker |
 | `YYYYMMDD_services_summary_groq.md` | Markdown summary grouped by competitor |
 | `all_competitors_priority_groq.csv` | Flat CSV of all scored services |
-| `processed_folders_groq.json` | State file — tracks which folders have been processed |
-| `hypothesis_tracker_groq.json` | Raw hypothesis assessment results |
+| `processed_folders_groq.json` | State file |
 
-### Excel sheets in the long-list workbook
+### Legacy analysis (`legacy_output/`)
 
-- **Long List** — all services ranked by priority score, with tier, plain-English summary, pricing signals, client wins, tech stack, data confidence
-- **Comparison Matrix** — one row per competitor with average scores per dimension
-- **Hypothesis Tracker** — evidence for/against each of the 5 strategic hypotheses, colour-coded by verdict
+| File | Description |
+|---|---|
+| `<source>_legacy_scored.xlsx` | Per-source scored workbook |
+| `YYYYMMDD_legacy_long_list.xlsx` | Consolidated long list ranked by priority score |
+| `YYYYMMDD_legacy_research_brief.md` | Research brief answering the 4 pillar questions |
+| `legacy_all_priority.csv` | Flat CSV of all scored legacy services/tools |
+| `legacy_processed_folders.json` | State file — enables incremental runs |
 
 ---
 
 ## Tips & Troubleshooting
 
-**A competitor returns 0 services**
-The extraction uses AI-keyword-weighted page sampling to ensure relevant pages are included even when they appear deep in the scraped content. If a competitor still returns 0 services, the scrape itself may be thin — check `sites/<folder>/pages_text.csv` for content. Consider re-scraping or using manual ingest.
+**A source returns 0 services**
+Check `legacy/<folder>/pages_text.csv` — the scrape may be thin (site blocked bots or content is JS-rendered). Re-scrape with `FRESH=1` or add better URLs to the input file.
 
 **Groq 429 rate limit errors**
-These are expected on the free tier and are handled automatically with retry backoff. The run will slow down but complete. Upgrade to a paid Groq tier or switch to a model with higher TPM limits to speed things up.
+Expected on the free tier — handled automatically with retry backoff. Use `--max-pages 5` to reduce token usage per source.
 
 **JSON parse errors in LLM output**
-The parser handles: markdown code fences, `<think>` blocks, pipe-separated enum values, and truncated arrays. If a competitor still fails, re-run with `--competitor <name>` to retry just that one.
+The parser handles markdown fences, `<think>` blocks, and truncated arrays. Re-run a single source with `--source <name>` to retry.
 
-**Scraper skipping sites or returning errors**
-Some sites block automated requests. Check logs for `Skip` messages. Try increasing `REQUEST_DELAY` in `scraper.py`.
+**Output files owned by root (Docker)**
+Files written by the container are owned by root. Run `sudo chown -R $USER:$USER output/ legacy_output/` to regain edit access.
 
-**EasyOCR slow on first local run**
-EasyOCR downloads its model (~100MB) on first use. In Docker this is cached at build time.
+**Resuming an interrupted legacy scrape**
+Just re-run the same command — the checkpoint system skips already-visited URLs automatically. Use `FRESH=1` only if you want to start the site from scratch.
 
 **Running on Windows locally**
 ```powershell
-$env:MAX_DEPTH="5"; python scraper.py
+$env:MAX_DEPTH="5"; python legacy_scraper.py
 ```
 
 ---
