@@ -263,6 +263,7 @@ def _call_ollama(system: str, user: str, retries: int = 3) -> str:
     payload = {
         "model": GROQ_MODEL,
         "temperature": 0.1,
+        "max_tokens": 2048,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user",   "content": user},
@@ -343,8 +344,8 @@ _EXTRACTION_SYSTEM = textwrap.dedent(f"""
     - AI Explorer → AI Practitioner (transition)
     - AI Practitioner → AI Champion (transition)
 
-    Return ONLY a valid JSON array. No markdown, no explanation, no preamble.
-    Each element must have exactly these keys:
+    Return ONLY a valid JSON array. No markdown, no explanation, no preamble. Max 8 services.
+    Each element must have EXACTLY these keys and no others:
     {{
       "name": "short service name",
       "category": "one of: {' | '.join(SERVICE_CATEGORIES)}",
