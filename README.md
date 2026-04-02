@@ -24,21 +24,133 @@ A separate **Legacy Modernisation pipeline** (stages 3 & 4) crawls legacy/mainfr
 
 ```
 project/
-├── scraper.py                      # Stage 1 — competitor web crawler
-├── analyse_groq.py                 # Stage 2 — competitor LLM analysis
-├── legacy_scraper.py               # Stage 3 — legacy modernisation web crawler
-├── legacy_analyse.py               # Stage 4 — legacy LLM analysis (Groq or Claude)
+├── scraper_new.py                  # Unified scraper (SCRAPE_MODE controls pipeline)
+├── analyse_new.py                  # Unified analyser (ANALYSE_MODE controls pipeline)
+├── lib/
+│   ├── core.py                     # Shared: AI calls, tier config, state, content loading
+│   ├── excel.py                    # Shared: openpyxl helpers
+│   ├── scraper_core.py             # Shared: BFS crawl engine, OCR, URL utils
+│   ├── keywords/
+│   │   ├── competitor.py           # Keyword taxonomy for competitor scraping
+│   │   ├── legacy.py               # Keyword taxonomy for legacy modernisation
+│   │   └── ai_consulting.py        # Keyword taxonomy for AI consulting
+│   └── pipelines/
+│       ├── competitor.py           # Prompts, scoring, hypotheses for competitor pipeline
+│       ├── legacy.py               # Prompts, 7-dim scoring for legacy pipeline
+│       └── ai_consulting.py        # Prompts, pricing inference for AI consulting pipeline
+├── scraper.py                      # Legacy: original competitor scraper (kept for reference)
+├── analyse_groq.py                 # Legacy: original competitor analyser (kept for reference)
+├── legacy_scraper.py               # Legacy: original legacy scraper (kept for reference)
+├── legacy_analyse.py               # Legacy: original legacy analyser (kept for reference)
+├── ai_scraper.py                   # Legacy: original AI consulting scraper (kept for reference)
+├── ai_analyse.py                   # Legacy: original AI consulting analyser (kept for reference)
 ├── manual_ingest.py                # Optional — ingest screenshots / text files
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-├── competitors.csv                 # Input for Stage 1
-├── legacy_modernization_urls.txt   # Input for Stage 3
-├── sites/                          # Stage 1 output
-├── output/                         # Stage 2 output
-├── legacy/                         # Stage 3 output
-└── legacy_output/                  # Stage 4 output
+├── competitors.csv                 # Input for competitor pipeline
+├── legacy_modernization_urls.txt   # Input for legacy pipeline
+├── ai_consulting_urls.txt          # Input for AI consulting pipeline
+├── sites/                          # Competitor scraper output
+├── output/                         # Competitor analyser output
+├── legacy/                         # Legacy scraper output
+├── legacy_output/                  # Legacy analyser output
+├── ai_sites/                       # AI consulting scraper output
+└── ai_output/                      # AI consulting analyser output
 ```
+
+---
+
+## Unified System (New)
+
+### Scraper — `scraper_new.py`
+
+One file handles all three pipelines. `SCRAPE_MODE` selects the keyword taxonomy and output directory.
+
+```bash
+# Competitor scraping
+docker compose exec -e SCRAPE_MODE=competitor scraper python3 /app/input/scraper_new.py
+
+# Legacy modernisation scraping
+docker compose exec -e SCRAPE_MODE=legacy -e MAX_SITE_MINUTES=60 \
+  scraper python3 /app/input/scraper_new.py
+
+# AI consulting scraping
+docker compose exec -e SCRAPE_MODE=ai_consulting \
+  scraper python3 /app/input/scraper_new.py
+```
+
+| `SCRAPE_MODE` | Input file | Output dir |
+|---|---|---|
+| `competitor` | `competitors.csv` | `sites/` |
+| `legacy` | `legacy_modernization_urls.txt` | `legacy/` |
+| `ai_consulting` | `ai_consulting_urls.txt` | `ai_sites/` |
+
+### Analyser — `analyse_new.py`
+
+One file handles all three pipelines. `ANALYSE_MODE` selects the pipeline logic.
+
+```bash
+# Competitor analysis (Groq, free tier)
+docker compose exec \
+  -e ANALYSE_MODE=competitor \
+  -e GROQ_API_KEY=<key> \
+  scraper python3 /app/input/analyse_new.py --max-pages 5
+
+# Legacy analysis (Claude — auto uses paid-tier limits)
+docker compose exec \
+  -e ANALYSE_MODE=legacy \
+  -e AI_BACKEND=claude \
+  -e ANTHROPIC_API_KEY=<key> \
+  scraper python3 /app/input/analyse_new.py
+
+# AI consulting analysis (Groq, paid tier)
+docker compose exec \
+  -e ANALYSE_MODE=ai_consulting \
+  -e GROQ_API_KEY=<key> \
+  -e GROQ_TIER=paid \
+  scraper python3 /app/input/analyse_new.py
+```
+
+| `ANALYSE_MODE` | Input dir | Output dir | Extra features |
+|---|---|---|---|
+| `competitor` | `sites/` | `output/` | Hypothesis tracking, comparison matrix |
+| `legacy` | `legacy/` | `legacy_output/` | 7-dim scoring, research brief |
+| `ai_consulting` | `ai_sites/` | `ai_output/` | Pricing inference, service type grouping |
+
+### CLI flags (all modes)
+
+| Flag | Description |
+|---|---|
+| `--rerun-all` | Clear state and reprocess everything |
+| `--source <name>` | Process only one source (fuzzy match) |
+| `--max-pages <n>` | Limit pages per source |
+| `--dry-run` | Show pending sources without calling the API |
+| `--weights <w>` | Comma-separated dimension weights (competitor/legacy only) |
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `SCRAPE_MODE` | `competitor` | `competitor` \| `legacy` \| `ai_consulting` |
+| `ANALYSE_MODE` | `competitor` | `competitor` \| `legacy` \| `ai_consulting` |
+| `AI_BACKEND` | `groq` | `groq` \| `claude` |
+| `GROQ_TIER` | `free` | `free` (6k TPM limits) \| `paid` (4x limits); ignored when `AI_BACKEND=claude` |
+| `GROQ_API_KEY` | — | Required if `AI_BACKEND=groq` |
+| `GROQ_MODEL` | `llama-3.1-8b-instant` | Any Groq model ID |
+| `ANTHROPIC_API_KEY` | — | Required if `AI_BACKEND=claude` |
+| `CLAUDE_MODEL` | `claude-haiku-4-20250514` | Any Anthropic model ID |
+| `MAX_DEPTH` | `2` | Crawl depth |
+| `MIN_RELEVANCE` | `2` | Min keyword hits to save a page |
+| `MAX_SITE_MINUTES` | `0` | Max minutes per site (0 = unlimited) |
+| `FRESH` | `0` | Set to `1` to ignore checkpoints |
+| `RERUN_ALL` | `0` | Set to `1` to reprocess all sources |
+
+> **Output files never overwrite across backends.** All output files are suffixed with the backend name — e.g. `*_groq.xlsx` and `*_claude.xlsx` are written separately.
+
+> **Claude auto-upgrades to paid-tier limits.** When `AI_BACKEND=claude`, `GROQ_TIER` is ignored and the 4x content limits apply automatically.
+
+---
 
 ---
 
