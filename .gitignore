@@ -1,15 +1,24 @@
+# ── Output / data directories (never commit scraped data or analysis outputs) ──
 sites/*
-old*/*
 output/*
-.marscode
-saved_chat
-
-TODO
-
 legacy/*
 legacy_output/*
+ai_sites/*
+ai_output/*
+client_sites/*
+client_output/*
 
+# ── Old / archived code ───────────────────────────────────────────────────────
+old*/*
+
+# ── Secrets & local config ────────────────────────────────────────────────────
 .env
 
-*.txt
+# ── IDE / tool artefacts ──────────────────────────────────────────────────────
+.marscode
+saved_chat
+TODO
+
+# ── Input data files (URLs, CSVs) — keep templates, ignore generated lists ───
 *.csv
+*.txt

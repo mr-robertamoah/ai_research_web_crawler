@@ -6,3 +6,5 @@ pandas==2.2.2
 openpyxl==3.1.2
 easyocr==1.7.1
 pytesseract==0.3.10
+anthropic>=0.25.0
+pdfplumber>=0.11.0

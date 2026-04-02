@@ -7,18 +7,27 @@ services:
       dockerfile: Dockerfile
     container_name: amalitech_scraper
     environment:
-      # Max depth to follow internal links (default: 3)
-      MAX_DEPTH: ${MAX_DEPTH:-3}
+      # Scraper / analyser mode
+      SCRAPE_MODE: ${SCRAPE_MODE:-competitor}
+      ANALYSE_MODE: ${ANALYSE_MODE:-competitor}
+      # Max depth to follow internal links (default: 2)
+      MAX_DEPTH: ${MAX_DEPTH:-2}
+      MIN_RELEVANCE: ${MIN_RELEVANCE:-2}
+      MAX_SITE_MINUTES: ${MAX_SITE_MINUTES:-0}
+      FRESH: ${FRESH:-0}
       # OCR engine: 'easyocr' (default) or 'pytesseract'
       OCR_ENGINE: ${OCR_ENGINE:-easyocr}
       # Optional: force a specific input file name
       INPUT_FILE: ${INPUT_FILE:-}
-      # Ollama
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://172.22.0.1:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      # AI backend: groq (default) or claude
+      AI_BACKEND: ${AI_BACKEND:-groq}
+      GROQ_TIER: ${GROQ_TIER:-free}
       # Groq
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-qwen/qwen3-32b}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      # Claude
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-20250514}
     volumes:
       # Mount your input file(s) from the project root into the container
       - .:/app/input:ro
@@ -30,6 +39,14 @@ services:
       - ./legacy:/app/legacy
       # Legacy analysis output
       - ./legacy_output:/app/legacy_output
+      # ai_scraper output
+      - ./ai_sites:/app/ai_sites
+      # ai_analysis output
+      - ./ai_output:/app/ai_output
+      # client intel scraper output
+      - ./client_sites:/app/client_sites
+      # client intel analysis output
+      - ./client_output:/app/client_output
     working_dir: /app
     # Keep container running so you can exec commands (scrape or manual ingest)
     command: >
