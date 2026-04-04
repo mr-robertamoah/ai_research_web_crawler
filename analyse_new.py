@@ -65,10 +65,11 @@ ANALYSE_MODE = os.getenv("ANALYSE_MODE", "competitor").lower().strip()
 SCRIPT_DIR   = Path(os.getenv("APP_DIR", Path(__file__).parent.resolve()))
 
 _MODES = {
-    "competitor":    ("SITES_DIR",    "sites",       "OUTPUT_DIR",          "output"),
-    "legacy":        ("LEGACY_DIR",   "legacy",      "LEGACY_OUTPUT_DIR",   "legacy_output"),
-    "ai_consulting": ("AI_SITES_DIR", "ai_sites",    "AI_OUTPUT_DIR",       "ai_output"),
-    "client_intel":  ("CLIENT_SITES_DIR", "client_sites", "CLIENT_OUTPUT_DIR", "client_output"),
+    "competitor":       ("SITES_DIR",         "sites",       "OUTPUT_DIR",          "output"),
+    "legacy":           ("LEGACY_DIR",         "legacy",      "LEGACY_OUTPUT_DIR",   "legacy_output"),
+    "ai_consulting":    ("AI_SITES_DIR",       "ai_sites",    "AI_OUTPUT_DIR",       "ai_output"),
+    "client_intel":     ("CLIENT_SITES_DIR",   "client_sites","CLIENT_OUTPUT_DIR",   "client_output"),
+    "news_monitoring":  ("NEWS_SITES_DIR",     "news_sites",  "NEWS_OUTPUT_DIR",     "news_output"),
 }
 if ANALYSE_MODE not in _MODES:
     raise ValueError(f"Unknown ANALYSE_MODE '{ANALYSE_MODE}'. Choose: {list(_MODES)}")
@@ -85,9 +86,10 @@ _pipeline = importlib.import_module(f"lib.pipelines.{ANALYSE_MODE.replace('_cons
 # Normalise module name
 _pipeline = importlib.import_module({
     "competitor":    "lib.pipelines.competitor",
-    "legacy":        "lib.pipelines.legacy",
-    "ai_consulting": "lib.pipelines.ai_consulting",
-    "client_intel":  "lib.pipelines.client_intel",
+    "legacy":           "lib.pipelines.legacy",
+    "ai_consulting":    "lib.pipelines.ai_consulting",
+    "client_intel":     "lib.pipelines.client_intel",
+    "news_monitoring":  "lib.pipelines.news_monitoring",
 }[ANALYSE_MODE])
 
 
@@ -461,6 +463,34 @@ def _rebuild_outputs(master: pd.DataFrame, state: dict, all_folders: list,
             _pipeline.write_executive_brief_md(brief, all_rows, OUTPUT_DIR / f"{ts}_client_executive_brief_{AI_BACKEND}.md")
         if hasattr(_pipeline, "write_potential_clients_md"):
             _pipeline.write_potential_clients_md(all_rows, all_folders, OUTPUT_DIR / f"{ts}_potential_clients_{AI_BACKEND}.md")
+
+    if ANALYSE_MODE == "news_monitoring":
+        # Deduplicate against all-time seen URLs
+        seen = _pipeline.load_seen_urls(OUTPUT_DIR)
+        new_rows, new_seen = _pipeline.deduplicate(all_rows, seen)
+        seen.update(new_seen)
+        _pipeline.save_seen_urls(OUTPUT_DIR, seen)
+        if new_rows:
+            _pipeline.append_to_daily_xlsx(new_rows, OUTPUT_DIR)
+            # Per-article alerts
+            alert_count = 0
+            for row in new_rows:
+                if row.get("alert_triggered") == "yes":
+                    _pipeline.send_article_alert(row)
+                    alert_count += 1
+            # Run-end digest
+            _pipeline.send_run_end_alert(
+                scanned=len(all_rows),
+                relevant=len(new_rows),
+                high=sum(1 for r in new_rows if r["priority_tier"] == "high"),
+                alerts=alert_count,
+            )
+            # Markdown run summary
+            if hasattr(_pipeline, "write_brief_md"):
+                _pipeline.write_brief_md({}, new_rows,
+                    OUTPUT_DIR / f"news_run_{datetime.now().strftime('%Y%m%d_%H%M')}_{AI_BACKEND}.md")
+        else:
+            log.info("  No new articles after deduplication.")
 
     done = sum(1 for v in state.values() if not v.get("skipped", False))
     log.info(f"\n{'='*55}")

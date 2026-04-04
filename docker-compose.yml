@@ -47,6 +47,10 @@ services:
       - ./client_sites:/app/client_sites
       # client intel analysis output
       - ./client_output:/app/client_output
+      # news monitoring scraper output
+      - ./news_sites:/app/news_sites
+      # news monitoring analysis output
+      - ./news_output:/app/news_output
     working_dir: /app
     # Keep container running so you can exec commands (scrape or manual ingest)
     command: >

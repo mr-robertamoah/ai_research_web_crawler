@@ -7,6 +7,8 @@ ai_sites/*
 ai_output/*
 client_sites/*
 client_output/*
+news_sites/*
+news_output/*
 
 # ── Old / archived code ───────────────────────────────────────────────────────
 old*/*

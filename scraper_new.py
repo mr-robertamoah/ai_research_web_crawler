@@ -54,10 +54,11 @@ SCRIPT_DIR       = Path(os.getenv("APP_DIR", Path(__file__).parent.resolve()))
 
 # ── MODE → keywords + dirs + default input file ───────────────────────────────
 _MODES = {
-    "competitor":    ("lib.keywords.competitor",    "sites",       "competitors.csv"),
-    "legacy":        ("lib.keywords.legacy",         "legacy",      "legacy_modernization_urls.txt"),
-    "ai_consulting": ("lib.keywords.ai_consulting",  "ai_sites",    "ai_consulting_urls.txt"),
-    "client_intel":  ("lib.keywords.client_intel",   "client_sites","client_intel_urls.txt"),
+    "competitor":       ("lib.keywords.competitor",       "sites",       "competitors.csv"),
+    "legacy":           ("lib.keywords.legacy",            "legacy",      "legacy_modernization_urls.txt"),
+    "ai_consulting":    ("lib.keywords.ai_consulting",     "ai_sites",    "ai_consulting_urls.txt"),
+    "client_intel":     ("lib.keywords.client_intel",      "client_sites","client_intel_urls.txt"),
+    "news_monitoring":  ("lib.keywords.news_monitoring",   "news_sites",  "news_monitoring_urls.txt"),
 }
 
 if SCRAPE_MODE not in _MODES:
@@ -70,7 +71,8 @@ KEYWORD_GROUPS = importlib.import_module(_kw_module).KEYWORD_GROUPS
 
 SITES_DIR = Path(os.getenv(
     {"competitor": "SITES_DIR", "legacy": "LEGACY_DIR",
-     "ai_consulting": "AI_SITES_DIR", "client_intel": "CLIENT_SITES_DIR"}[SCRAPE_MODE],
+     "ai_consulting": "AI_SITES_DIR", "client_intel": "CLIENT_SITES_DIR",
+     "news_monitoring": "NEWS_SITES_DIR"}[SCRAPE_MODE],
     str(SCRIPT_DIR / _sites_subdir)
 ))
 
