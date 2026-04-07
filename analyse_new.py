@@ -353,7 +353,9 @@ def run(source_filter: str = "", weights_str: str = "", max_pages: int = 0,
         name = source_name(folder)
         log.info(f"\n{'─'*55}\n  {name}  ({folder.name})\n{'─'*55}")
 
-        content = load_content(folder, max_pages)
+        content = (_pipeline.load_news_content(folder, max_pages)
+                   if ANALYSE_MODE == "news_monitoring" and hasattr(_pipeline, "load_news_content")
+                   else load_content(folder, max_pages))
         if not content.strip():
             log.warning("  No content — skipping.")
             state[folder.name] = {"processed_at": datetime.now().isoformat(timespec="seconds"),
@@ -580,9 +582,23 @@ def main():
     parser.add_argument("--max-pages", "-p", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rerun-all", action="store_true")
+    parser.add_argument("--publish", action="store_true",
+                        help="Publish outputs to Confluence after analysis (competitor/legacy/ai_consulting/client_intel only)")
     args = parser.parse_args()
     run(source_filter=args.source, weights_str=args.weights, max_pages=args.max_pages,
         dry_run=args.dry_run, rerun_all=args.rerun_all)
+
+    if args.publish and ANALYSE_MODE in ("competitor", "legacy", "ai_consulting", "client_intel"):
+        log.info(f"\nPublishing {ANALYSE_MODE} outputs to Confluence...")
+        import subprocess, sys
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent / "confluence_publish.py"), "--mode", ANALYSE_MODE],
+            cwd=str(Path(__file__).parent),
+        )
+        if result.returncode != 0:
+            log.error("Confluence publish failed — check output above.")
+        else:
+            log.info("Confluence publish complete.")
 
 
 if __name__ == "__main__":

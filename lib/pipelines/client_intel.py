@@ -104,7 +104,7 @@ def build_rows(source: str, services: list[dict]) -> list[dict]:
             "priority_score":   _signal_priority(sig),
             "priority_tier":    _signal_tier(sig),
         })
-    rows.sort(key=lambda r: -r["priority_score"])
+    rows.sort(key=lambda r: -float(r.get("priority_score", 0) or 0))
     return rows
 
 
@@ -158,7 +158,7 @@ def write_brief_md(brief: dict, all_rows: list[dict], path: Path) -> None:
     lines += ["## Full Signal List by Client", ""]
     n = 1
     for src in sorted(by_source):
-        rows = sorted(by_source[src], key=lambda r: -r["priority_score"])
+        rows = sorted(by_source[src], key=lambda r: -float(r.get("priority_score", 0) or 0))
         lines += [f"### {src}", "",
                   "| # | Signal Type | Title | Vendors | Budget | Maturity | Source |",
                   "|---|---|---|---|---|---|---|"]
@@ -246,7 +246,7 @@ def write_market_summary_md(all_rows: list[dict], path: Path) -> None:
         "| Client | Budget Mention | Signal Type | Source |",
         "|---|---|---|---|",
     ]
-    for row in sorted(budget_rows, key=lambda r: -r["priority_score"]):
+    for row in sorted(budget_rows, key=lambda r: -float(r.get("priority_score", 0) or 0)):
         lines.append(f"| {row['source']} | {row['budget_mention']} | {row['signal_type']} | {row['source_type']} |")
 
     lines += [
@@ -259,7 +259,7 @@ def write_market_summary_md(all_rows: list[dict], path: Path) -> None:
     for src in sorted(by_source):
         rows = by_source[src]
         top_vendors = Counter(v.strip() for r in rows for v in r.get("vendor_tools","").split(",") if v.strip()).most_common(3)
-        top_signals = sorted(rows, key=lambda r: -r["priority_score"])[:3]
+        top_signals = sorted(rows, key=lambda r: -float(r.get("priority_score", 0) or 0))[:3]
         budgets     = [r["budget_mention"] for r in rows if r.get("budget_mention","").strip()]
         maturity    = Counter(r["maturity"] for r in rows if r.get("maturity")).most_common(1)
         lines += [
@@ -335,7 +335,7 @@ def write_executive_brief_md(brief: dict, all_rows: list[dict], path: Path) -> N
         "| Client | Investment Signal | Source |",
         "|---|---|---|",
     ]
-    for row in sorted(budget_rows, key=lambda r: -r["priority_score"])[:10]:
+    for row in sorted(budget_rows, key=lambda r: -float(r.get("priority_score", 0) or 0))[:10]:
         lines.append(f"| {row['source']} | {row['budget_mention']} | {row['source_type']} |")
 
     if brief:
@@ -464,7 +464,7 @@ def write_potential_clients_md(all_rows: list[dict], all_folders: list, path: Pa
             "| Signal | Type | Maturity | Budget |",
             "|---|---|---|---|",
         ]
-        for row in sorted(pot_rows, key=lambda r: -r["priority_score"])[:5]:
+        for row in sorted(pot_rows, key=lambda r: -float(r.get("priority_score", 0) or 0))[:5]:
             lines.append(f"| {row['title']} | {row['signal_type']} | {row['maturity']} | {row.get('budget_mention','') or '—'} |")
         lines.append("")
 
