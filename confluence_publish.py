@@ -307,14 +307,14 @@ def publish_competitor(folder_id: str, dry_run: bool) -> None:
                              "Competitor": comp, "Verdict": h_val.get("verdict",""),
                              "Evidence For": h_val.get("evidence_for","")[:200],
                              "Evidence Against": h_val.get("evidence_against","")[:200]})
-        upsert(folder_id, "Hypothesis Tracker",
+        upsert(folder_id, "Competitor — Hypothesis Tracker",
                _info(f"Strategic hypothesis verdicts per competitor. Updated {ts}.") +
                _table(pd.DataFrame(rows)), dry_run)
 
     # Market summary
     md_file = _latest(out, "*competitor_market_summary*.md")
     if md_file:
-        upsert(folder_id, "Market Summary",
+        upsert(folder_id, "Competitor — Market Summary",
                _info(f"Competitor market summary. Updated {ts}.") +
                _md_to_html(md_file.read_text(encoding="utf-8")), dry_run)
 
@@ -365,7 +365,7 @@ def publish_ai_consulting(folder_id: str, dry_run: bool) -> None:
                       for i in str(r).split(",") if i.strip()]
     c_df = pd.DataFrame(Counter(all_clients).most_common(50), columns=["Client", "# Mentions"])
     i_df = pd.DataFrame(Counter(all_industries).most_common(30), columns=["Industry", "# Mentions"])
-    upsert(folder_id, "Named Clients & Industries",
+    upsert(folder_id, "AI Consulting — Named Clients & Industries",
            _info(f"Named clients and industries found across AI consulting pages. Updated {ts}.") +
            _h2("Top Clients") + _table(c_df) +
            _h2("Top Industries") + _table(i_df), dry_run)
@@ -373,7 +373,7 @@ def publish_ai_consulting(folder_id: str, dry_run: bool) -> None:
     # Pricing & format analysis
     md_file = _latest(out, "*ai_market_summary*.md")
     if md_file:
-        upsert(folder_id, "Pricing & Format Analysis",
+        upsert(folder_id, "AI Consulting — Pricing & Format Analysis",
                _info(f"Delivery formats, pricing models, and price ranges. Updated {ts}.") +
                _md_to_html(md_file.read_text(encoding="utf-8")), dry_run)
 
@@ -403,19 +403,19 @@ def publish_legacy(folder_id: str, dry_run: bool) -> None:
     # High priority services
     high = df[df["priority_tier"].str.lower() == "high"].sort_values(
         "priority_score", ascending=False, key=lambda s: pd.to_numeric(s, errors="coerce").fillna(0))
-    upsert(folder_id, "High Priority Services",
+    upsert(folder_id, "Legacy — High Priority Services",
            _info(f"{len(high)} high-priority legacy modernisation services. Updated {ts}.") +
            _table(high[[c for c in svc_cols if c in high.columns]]), dry_run)
 
     # All services
-    upsert(folder_id, "All Services & Tools",
+    upsert(folder_id, "Legacy — All Services & Tools",
            _info(f"All {len(df)} legacy modernisation services and tools. Updated {ts}.") +
            _table(df[[c for c in svc_cols if c in df.columns]]), dry_run)
 
     # Research brief
     md_file = _latest(out, "*legacy*brief*.md")
     if md_file:
-        upsert(folder_id, "Research Brief",
+        upsert(folder_id, "Legacy — Research Brief",
                _info(f"Research brief answering the 4 pillar questions. Updated {ts}.") +
                _md_to_html(md_file.read_text(encoding="utf-8")), dry_run)
 
@@ -471,14 +471,14 @@ def publish_client_intel(folder_id: str, dry_run: bool) -> None:
     all_vendors = [v.strip() for r in df["vendor_tools"].tolist()
                    for v in str(r).split(",") if v.strip()]
     v_df = pd.DataFrame(Counter(all_vendors).most_common(40), columns=["Vendor / Tool", "# Client Mentions"])
-    upsert(folder_id, "Vendor & Tool Usage",
+    upsert(folder_id, "Client Intel — Vendor & Tool Usage",
            _info(f"AI vendors and tools confirmed in use across clients. Updated {ts}.") +
            _table(v_df), dry_run)
 
     # Potential client matches
     md_file = _latest(out, "*potential_clients*.md")
     if md_file:
-        upsert(folder_id, "Potential Client Matches",
+        upsert(folder_id, "Client Intel — Potential Client Matches",
                _info(f"Potential clients matched to existing client profiles. Updated {ts}.") +
                _md_to_html(md_file.read_text(encoding="utf-8")), dry_run)
 
