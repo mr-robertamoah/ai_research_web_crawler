@@ -592,7 +592,7 @@ def main():
         log.info(f"\nPublishing {ANALYSE_MODE} outputs to Confluence...")
         import subprocess, sys
         result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "confluence_publish.py"), "--mode", ANALYSE_MODE],
+            [sys.executable, str(Path(__file__).parent / "confluence_publish.py"), "--mode", "all"],
             cwd=str(Path(__file__).parent),
         )
         if result.returncode != 0:
