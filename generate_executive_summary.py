@@ -84,6 +84,34 @@ def load_csv(directory: Path, pattern: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _extract_hpage_verdicts() -> dict[int, str]:
+    """
+    Read the most recent hypothesis MD files and extract the Overall Verdict
+    from each. Returns {1: "Insufficient data", 2: "Mixed", ...}
+    Falls back to empty dict if files not found.
+    """
+    verdicts = {}
+    out_dir = SCRIPT_DIR / "output"
+    short_slugs = [
+        "ai_premium_pricing",
+        "shift_to_outcome",
+        "hyperscaler_partnerships",
+        "european_data_sovereignty",
+        "vertical_concentration",
+    ]
+    for i in range(1, 6):
+        # Match any hypothesis file for this number
+        matches = sorted(out_dir.glob(f"*hypothesis_{i}_*.md"), key=lambda p: p.stat().st_mtime)
+        if not matches:
+            continue
+        content = matches[-1].read_text(encoding="utf-8")
+        # Extract "## Overall Verdict: <verdict>" line
+        m = re.search(r"##\s+Overall Verdict:\s*(.+)", content, re.IGNORECASE)
+        if m:
+            verdicts[i] = m.group(1).strip().rstrip("*").strip()
+    return verdicts
+
+
 def build_data_context() -> dict:
     """Assemble a compact structured summary of all pipeline data for the LLM."""
     hyp_data    = load_hypothesis_data()
@@ -102,16 +130,21 @@ def build_data_context() -> dict:
     md_legacy      = _read_md(SCRIPT_DIR / "legacy_output", "*legacy*brief*.md")
     md_client      = _read_md(SCRIPT_DIR / "client_output", "*client_market_summary*.md")
 
-    # ── Hypothesis aggregate verdicts (competitor pipeline) ──
+    # ── Hypothesis verdicts: read from H-page MD files (ground truth) ──
+    hpage_verdicts = _extract_hpage_verdicts()
+
     hyp_summary = []
     for i, hyp_text in enumerate(HYPOTHESES, 1):
         h_key = f"h{i}"
-        verdicts = [v[h_key]["verdict"] for v in hyp_data.values() if h_key in v]
-        counts   = Counter(verdicts)
-        total    = len(verdicts) or 1
-        overall  = ("Confirmed" if counts.get("Confirmed",0) > total*0.5
-                    else "Refuted" if counts.get("Refuted",0) > total*0.5
-                    else "Mixed / Insufficient data")
+        verdicts_list = [v[h_key]["verdict"] for v in hyp_data.values() if h_key in v]
+        counts        = Counter(verdicts_list)
+        total         = len(verdicts_list) or 1
+        # Use H-page verdict as ground truth; fall back to computed if not available
+        overall = hpage_verdicts.get(i) or (
+            "Confirmed" if counts.get("Confirmed",0) > total*0.5
+            else "Refuted" if counts.get("Refuted",0) > total*0.5
+            else "Mixed / Insufficient data"
+        )
         evidence_for     = [v[h_key].get("evidence_for","")     for v in hyp_data.values() if h_key in v and v[h_key].get("evidence_for","").strip()][:5]
         evidence_against = [v[h_key].get("evidence_against","") for v in hyp_data.values() if h_key in v and v[h_key].get("evidence_against","").strip()][:5]
         hyp_summary.append({
@@ -252,6 +285,8 @@ AmaliTech context:
 - Considering launching AI consulting services and legacy modernisation services
 - Competing against Accenture, Deloitte, BCG, Wipro, Thoughtworks and boutique AI firms
 
+CRITICAL INSTRUCTION: The hypothesis verdicts provided in the data are the AUTHORITATIVE verdicts from the individual hypothesis analysis pages (H1–H5). You MUST use these exact verdict labels in the Executive Summary. Do NOT reinterpret or override them. The narrative under each hypothesis must be consistent with and supportive of its verdict label.
+
 Write with authority and precision. Be direct. No filler phrases. Every sentence must carry information.
 """
 
@@ -266,6 +301,8 @@ Structure EXACTLY as follows (use these exact markdown headers):
 [3–4 sentences: what is happening in the AI services market right now, what is the dominant trend, what does this mean for a company like AmaliTech]
 
 ## Hypothesis Verdicts
+*These verdicts reflect the AmaliTech-strategy interpretation from the individual hypothesis pages (H1–H5), which build on the aggregate evidence in the Competitor Hypothesis Tracker and Research folders.*
+
 [For EACH of the 5 hypotheses, write a subsection:]
 
 ### H1: [short hypothesis title]
