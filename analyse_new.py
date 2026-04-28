@@ -69,7 +69,8 @@ _MODES = {
     "legacy":           ("LEGACY_DIR",         "legacy",      "LEGACY_OUTPUT_DIR",   "legacy_output"),
     "ai_consulting":    ("AI_SITES_DIR",       "ai_sites",    "AI_OUTPUT_DIR",       "ai_output"),
     "client_intel":     ("CLIENT_SITES_DIR",   "client_sites","CLIENT_OUTPUT_DIR",   "client_output"),
-    "news_monitoring":  ("NEWS_SITES_DIR",     "news_sites",  "NEWS_OUTPUT_DIR",     "news_output"),
+    "news_monitoring":  ("NEWS_SITES_DIR",      "news_sites",       "NEWS_OUTPUT_DIR",      "news_output"),
+    "competitor_spend": ("COMP_SPEND_SITES_DIR", "comp_spend_sites", "COMP_SPEND_OUTPUT_DIR","comp_spend_output"),
 }
 if ANALYSE_MODE not in _MODES:
     raise ValueError(f"Unknown ANALYSE_MODE '{ANALYSE_MODE}'. Choose: {list(_MODES)}")
@@ -90,6 +91,7 @@ _pipeline = importlib.import_module({
     "ai_consulting":    "lib.pipelines.ai_consulting",
     "client_intel":     "lib.pipelines.client_intel",
     "news_monitoring":  "lib.pipelines.news_monitoring",
+    "competitor_spend": "lib.pipelines.competitor_spend",
 }[ANALYSE_MODE])
 
 
@@ -154,6 +156,17 @@ def _write_sheet(ws, rows: list[dict], sheet_title: str) -> None:
                     r.get("strategic_intent",""), r.get("maturity",""),
                     r.get("source_type",""), r.get("priority_tier","")]
         priority_col = 11; center_cols = {1, 3, 9, 10, 11}
+
+    if ANALYSE_MODE == "competitor_spend":
+        headers = ["#","Competitor","Spend Type","Title","Vendor/Target",
+                   "Investment Signal","Strategic Intent","Pricing Implication","Maturity","Priority"]
+        widths  = [5,22,18,30,28,25,35,35,14,12]
+        def row_values(i, r):
+            return [i, r.get("source",""), r.get("spend_type",""), r.get("title",""),
+                    r.get("vendor_or_target",""), r.get("investment_signal",""),
+                    r.get("strategic_intent",""), r.get("pricing_implication",""),
+                    r.get("maturity",""), r.get("priority_tier","")]
+        priority_col = 10; center_cols = {1, 3, 9, 10}
 
     title_row(ws, 1, sheet_title, len(headers))
     header_row(ws, 2, headers, widths)
@@ -466,6 +479,12 @@ def _rebuild_outputs(master: pd.DataFrame, state: dict, all_folders: list,
         if hasattr(_pipeline, "write_potential_clients_md"):
             _pipeline.write_potential_clients_md(all_rows, all_folders, OUTPUT_DIR / f"{ts}_potential_clients_{AI_BACKEND}.md")
 
+    if ANALYSE_MODE == "competitor_spend":
+        if hasattr(_pipeline, "write_market_summary_md"):
+            _pipeline.write_market_summary_md(all_rows, OUTPUT_DIR / f"{ts}_comp_spend_market_summary_{AI_BACKEND}.md")
+        if hasattr(_pipeline, "write_executive_brief_md"):
+            _pipeline.write_executive_brief_md(brief, all_rows, OUTPUT_DIR / f"{ts}_comp_spend_executive_brief_{AI_BACKEND}.md")
+
     if ANALYSE_MODE == "news_monitoring":
         # Deduplicate against all-time seen URLs
         seen = _pipeline.load_seen_urls(OUTPUT_DIR)
@@ -564,6 +583,18 @@ def _write_detail_workbook(source: str, rows: list[dict], path: Path) -> None:
                              r.get("evidence",""), r.get("source_url",""), r.get("priority_tier","")]
         pcol = 12
 
+    if ANALYSE_MODE == "competitor_spend":
+        headers = ["Competitor","Spend Type","Title","Vendor/Target","Description",
+                   "Investment Signal","Strategic Intent","Pricing Implication",
+                   "Maturity","Evidence","Source URL","Priority"]
+        widths  = [22,18,30,28,45,25,35,35,14,40,30,12]
+        def vals(r): return [r.get("source",""), r.get("spend_type",""), r.get("title",""),
+                             r.get("vendor_or_target",""), r.get("description",""),
+                             r.get("investment_signal",""), r.get("strategic_intent",""),
+                             r.get("pricing_implication",""), r.get("maturity",""),
+                             r.get("evidence",""), r.get("source_url",""), r.get("priority_tier","")]
+        pcol = 12
+
     title_row(ws, 1, f"{ANALYSE_MODE.replace('_',' ').title()} Analysis — {source}", len(headers))
     header_row(ws, 2, headers, widths)
     ws.freeze_panes = "A3"
@@ -588,11 +619,14 @@ def main():
     run(source_filter=args.source, weights_str=args.weights, max_pages=args.max_pages,
         dry_run=args.dry_run, rerun_all=args.rerun_all)
 
-    if args.publish and ANALYSE_MODE in ("competitor", "legacy", "ai_consulting", "client_intel"):
+    if args.publish and ANALYSE_MODE in ("competitor", "legacy", "ai_consulting", "client_intel", "competitor_spend"):
         log.info(f"\nPublishing {ANALYSE_MODE} outputs to Confluence...")
         import subprocess, sys
+        cf_mode = {"competitor": "research", "ai_consulting": "research",
+                   "legacy": "research", "client_intel": "research",
+                   "competitor_spend": "competitor_spend"}.get(ANALYSE_MODE, "all")
         result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "confluence_publish.py"), "--mode", "all"],
+            [sys.executable, str(Path(__file__).parent / "confluence_publish.py"), "--mode", cf_mode],
             cwd=str(Path(__file__).parent),
         )
         if result.returncode != 0:

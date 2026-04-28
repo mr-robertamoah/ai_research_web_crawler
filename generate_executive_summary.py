@@ -118,7 +118,8 @@ def build_data_context() -> dict:
     comp_df     = load_csv(SCRIPT_DIR / "output",        "competitor_all_priority_*.csv")
     ai_df       = load_csv(SCRIPT_DIR / "ai_output",     "ai_consulting_all_priority_*.csv")
     legacy_df   = load_csv(SCRIPT_DIR / "legacy_output", "legacy_all_priority*.csv")
-    client_df   = load_csv(SCRIPT_DIR / "client_output", "client_intel_all_priority*.csv")
+    client_df   = load_csv(SCRIPT_DIR / "client_output",      "client_intel_all_priority*.csv")
+    spend_df    = load_csv(SCRIPT_DIR / "comp_spend_output",  "competitor_spend_all_priority_*.csv")
 
     # ── Load narrative MD files for richer context ──
     def _read_md(directory: Path, pattern: str) -> str:
@@ -128,7 +129,8 @@ def build_data_context() -> dict:
     md_competitor  = _read_md(SCRIPT_DIR / "output",        "*competitor_market_summary*.md")
     md_ai          = _read_md(SCRIPT_DIR / "ai_output",     "*ai_market_summary*.md")
     md_legacy      = _read_md(SCRIPT_DIR / "legacy_output", "*legacy*brief*.md")
-    md_client      = _read_md(SCRIPT_DIR / "client_output", "*client_market_summary*.md")
+    md_client      = _read_md(SCRIPT_DIR / "client_output",      "*client_market_summary*.md")
+    md_spend       = _read_md(SCRIPT_DIR / "comp_spend_output",  "*comp_spend_market_summary*.md")
 
     # ── Hypothesis verdicts: read from H-page MD files (ground truth) ──
     hpage_verdicts = _extract_hpage_verdicts()
@@ -220,6 +222,23 @@ def build_data_context() -> dict:
             "budget_signals": client_df[client_df.get("signal_type","") == "budget_signal"]["budget_mention"].tolist()[:5] if "signal_type" in client_df.columns else [],
         }
 
+    # ── Competitor spend snapshot ──
+    spend_snap = {}
+    if not spend_df.empty:
+        vendor_counts = Counter(v.strip() for r in spend_df.get("vendor_or_target", pd.Series(dtype=str)).tolist()
+                                for v in str(r).split(",") if v.strip())
+        pricing_sigs  = [r for r in spend_df.get("pricing_implication", pd.Series(dtype=str)).tolist()
+                         if str(r).strip() and str(r).lower() not in ("nan","")]
+        spend_snap = {
+            "total_signals": int(len(spend_df)),
+            "competitors": int(spend_df["source"].nunique() if "source" in spend_df.columns else 0),
+            "spend_types": {k: int(v) for k, v in spend_df["spend_type"].value_counts().to_dict().items()} if "spend_type" in spend_df.columns else {},
+            "top_vendors": [(v, int(n)) for v, n in vendor_counts.most_common(8)],
+            "pricing_signals": pricing_sigs[:8],
+            "investment_signals": [r for r in spend_df.get("investment_signal", pd.Series(dtype=str)).tolist()
+                                   if str(r).strip() and str(r).lower() not in ("nan","")][:8],
+        }
+
     return {
         "hypotheses": hyp_summary,
         "ai_consulting_hypothesis_evidence": ai_hyp_evidence,
@@ -227,11 +246,13 @@ def build_data_context() -> dict:
         "ai_consulting": ai_snap,
         "legacy": legacy_snap,
         "client_intel": client_snap,
+        "competitor_spend": spend_snap,
         "narratives": {
             "competitor_market_summary": md_competitor,
             "ai_consulting_market_summary": md_ai,
             "legacy_research_brief": md_legacy,
             "client_market_summary": md_client,
+            "competitor_spend_summary": md_spend,
         },
         "generated_at": datetime.now().strftime("%B %Y"),
     }
@@ -271,6 +292,12 @@ def _build_prompt_data(ctx: dict) -> str:
     if narratives.get("client_market_summary"):
         parts.append("\n=== CLIENT INTELLIGENCE MARKET SUMMARY ===")
         parts.append(narratives["client_market_summary"])
+    if narratives.get("competitor_spend_summary"):
+        parts.append("\n=== COMPETITOR AI SPEND INTELLIGENCE ===")
+        parts.append(narratives["competitor_spend_summary"])
+    if ctx.get("competitor_spend"):
+        parts.append("\n=== COMPETITOR SPEND SNAPSHOT ===")
+        parts.append(json.dumps(ctx["competitor_spend"], indent=2))
 
     return "\n".join(parts)
 
@@ -324,6 +351,9 @@ Structure EXACTLY as follows (use these exact markdown headers):
 
 ## Client AI Spend Signals
 [2–3 sentences: which clients are actively investing, what vendors they are using, what this means for AmaliTech's account strategy]
+
+## Competitor AI Spending
+[2–3 sentences: where competitors are investing their own money (vendors, platforms, acquisitions, internal R&D), what this reveals about their capability roadmap and pricing strategy]
 
 ## Strategic Recommendations
 [Exactly 5 numbered recommendations, each 2 sentences: what to do and why, grounded in the data above]

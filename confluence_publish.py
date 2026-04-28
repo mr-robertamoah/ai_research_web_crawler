@@ -503,12 +503,82 @@ def publish_market_trends(parent_id: str, dry_run: bool) -> None:
                _md_to_html(md_file.read_text(encoding="utf-8")), dry_run)
 
 
+def _safe_title(name: str) -> str:
+    """Sanitise a name for use as a Confluence page title."""
+    return re.sub(r"[^\w\s\-&()]", "", name).strip()[:100]
+
+
+def publish_competitor_spend(parent_id: str, dry_run: bool) -> None:
+    """Publish competitor AI spend intelligence pages."""
+    out = SCRIPT_DIR / "comp_spend_output"
+    csv = _latest(out, "competitor_spend_all_priority_*.csv")
+    if not csv:
+        log.warning("Competitor spend CSV not found — skipping.")
+        return
+
+    df = pd.read_csv(csv, dtype=str).fillna("")
+    ts = _ts()
+    by_source = {s: g for s, g in df.groupby("source")}
+
+    vendor_counts = Counter(r.strip() for row in df.get("vendor_or_target", pd.Series(dtype=str)).tolist()
+                            for r in str(row).split(",") if r.strip())
+    idx_rows = []
+    for src, rows in sorted(by_source.items()):
+        top_types = Counter(rows["spend_type"].tolist()).most_common(2)
+        investment = next((r for r in rows["investment_signal"].tolist() if str(r).strip()), "—")
+        idx_rows.append({
+            "Competitor": src, "# Signals": len(rows),
+            "Dominant Spend Type": ", ".join(t for t, _ in top_types),
+            "Investment Signal": str(investment)[:100],
+        })
+    upsert(parent_id, "Competitor Spend — Index",
+           _info(f"{len(by_source)} competitors. {len(df)} spend signals. Updated {ts}.") +
+           _table(pd.DataFrame(idx_rows)), dry_run)
+
+    v_df = pd.DataFrame(vendor_counts.most_common(25), columns=["Vendor / Platform", "# Competitors Using"])
+    upsert(parent_id, "Competitor Spend — Vendor Usage",
+           _info(f"AI vendors competitors are actively using or partnering with. Updated {ts}.") +
+           _table(v_df), dry_run)
+
+    pricing_rows = df[df["pricing_implication"].str.strip().astype(bool)]
+    if not pricing_rows.empty:
+        upsert(parent_id, "Competitor Spend — Pricing Signals",
+               _info(f"Pricing strategy signals from competitor spend data. Updated {ts}.") +
+               _table(pricing_rows[["source","title","spend_type","pricing_implication","priority_tier"]]), dry_run)
+
+    sig_cols = ["spend_type","title","vendor_or_target","investment_signal",
+                "strategic_intent","pricing_implication","maturity","priority_tier"]
+    for src, rows in sorted(by_source.items()):
+        rows_s = rows.sort_values("priority_score", ascending=False,
+                                  key=lambda s: pd.to_numeric(s, errors="coerce").fillna(0))
+        body = _info(f"{src} — {len(rows)} AI spend signals. Updated {ts}.")
+        high = rows_s[rows_s["priority_tier"].str.lower() == "high"]
+        if not high.empty:
+            body += _h2(f"🔴 High Priority ({len(high)})")
+            body += _table(high[[c for c in sig_cols if c in high.columns]])
+        rest = rows_s[rows_s["priority_tier"].str.lower() != "high"]
+        if not rest.empty:
+            body += _h2(f"Other Signals ({len(rest)})")
+            body += _table(rest[[c for c in sig_cols if c in rest.columns]])
+        upsert(parent_id, f"{_safe_title(src)} (Spend)", body, dry_run)
+
+    for title, pattern in [("Competitor Spend — Market Summary", "*comp_spend_market_summary*.md"),
+                            ("Competitor Spend — Executive Brief", "*comp_spend_executive_brief*.md")]:
+        md = _latest(out, pattern)
+        if md:
+            upsert(parent_id, title,
+                   _info(f"{title}. Updated {ts}.") + _md_to_html(md.read_text(encoding="utf-8")), dry_run)
+
+
 def publish_research(dry_run: bool = False) -> None:
     """Publish the full Research/ folder structure."""
-    ts = _ts()
     log.info("  Building Research/Competitors/")
     comp_id = ensure_folder_page(RESEARCH_ID, "Competitors", dry_run)
     publish_competitors(comp_id, dry_run)
+
+    log.info("  Building Research/Competitor AI Spend/")
+    spend_id = ensure_folder_page(RESEARCH_ID, "Competitor AI Spend", dry_run)
+    publish_competitor_spend(spend_id, dry_run)
 
     log.info("  Building Research/Clients & Prospects/")
     client_id = ensure_folder_page(RESEARCH_ID, "Clients & Prospects", dry_run)
@@ -683,6 +753,12 @@ def run(mode: str = "all", dry_run: bool = False) -> None:
         publish_research(dry_run)
         log.info("  ✓ Research folder done.")
 
+    if mode in ("all", "competitor_spend"):
+        log.info(f"\n{'─'*55}\n  Competitor AI Spend\n{'─'*55}")
+        spend_id = ensure_folder_page(RESEARCH_ID, "Competitor AI Spend", dry_run)
+        publish_competitor_spend(spend_id, dry_run)
+        log.info("  ✓ Competitor AI Spend done.")
+
     if mode in ("all", "strategy"):
         log.info(f"\n{'─'*55}\n  Strategy Folders\n{'─'*55}")
         publish_strategies(dry_run)
@@ -692,7 +768,8 @@ def run(mode: str = "all", dry_run: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Publish pipeline outputs to Confluence")
-    parser.add_argument("--mode", default="all", choices=["all", "research", "strategy"])
+    parser.add_argument("--mode", default="all",
+                        choices=["all", "research", "strategy", "competitor_spend"])
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     run(mode=args.mode, dry_run=args.dry_run)
